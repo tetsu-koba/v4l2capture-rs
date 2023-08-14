@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::io::ErrorKind;
 use std::io::Write;
 use std::process::exit;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -93,20 +94,11 @@ fn main() {
                 );
                 match writer.write_all(buf) {
                     Ok(_) => {}
+                    Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+                    Err(ref e) if e.kind() == ErrorKind::BrokenPipe => break,
                     Err(e) => {
-                        if let Some(raw_os_err) = e.raw_os_error() {
-                            match raw_os_err {
-                                libc::EINTR => {}
-                                libc::EPIPE => break,
-                                _ => {
-                                    eprintln!("raw OS error: {raw_os_err:?}");
-                                    break;
-                                }
-                            }
-                        } else {
-                            eprintln!("error: {e:?}");
-                            break;
-                        }
+                        eprintln!("error: {e:?}");
+                        break;
                     }
                 }
                 frame_count += 1;
@@ -114,13 +106,10 @@ fn main() {
                     break;
                 }
             }
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
             Err(e) => {
-                if let Some(raw_os_err) = e.raw_os_error() {
-                    if raw_os_err != libc::EINTR {
-                        println!("raw OS error: {raw_os_err:?}");
-                        break;
-                    }
-                }
+                println!("raw OS error: {e:?}");
+                break;
             }
         }
     }
