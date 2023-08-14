@@ -57,6 +57,48 @@ pub fn set_pipe_max_size(file: &File) -> Result<(), io::Error> {
     Ok(())
 }
 
+fn get_errno() -> libc::c_int {
+    unsafe { *libc::__errno_location() }
+}
+
+pub fn vmsplice_single_buffer(buf: &[u8], fd: libc::c_int) -> Result<(), &'static str> {
+    let mut iov = libc::iovec {
+        iov_base: buf.as_ptr() as *mut libc::c_void,
+        iov_len: buf.len(),
+    };
+    loop {
+        let n = unsafe {
+            libc::vmsplice(
+                fd,
+                &mut iov as *mut _,
+                1,
+                libc::SPLICE_F_GIFT as libc::c_uint,
+            )
+        };
+        if n < 0 {
+            match get_errno() {
+                libc::EINTR => continue,
+                libc::EAGAIN => unreachable!(),
+                libc::EPIPE => return Err("BrokenPipe"),
+                libc::EBADF => return Err("InvalidFileDescriptor"),
+                libc::EINVAL => return Err("InvalidArgument"),
+                libc::ENOMEM => return Err("SystemResources"),
+                _ => {
+                    eprintln!("vmsplice: errno={}", get_errno());
+                    return Err("VmspliceFailed");
+                }
+            }
+        } else if n as usize == iov.iov_len {
+            return Ok(());
+        } else if n != 0 {
+            iov.iov_len -= n as usize;
+            iov.iov_base = (iov.iov_base as usize + n as usize) as *mut libc::c_void;
+            continue;
+        }
+        return Err("Vmsplice");
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -91,8 +133,9 @@ fn main() {
     }
     let mut writer =
         File::create(out_file).unwrap_or_else(|_| panic!("failed to open :{}", out_file));
+    let mut output_to_pipe = false;
     if is_pipe(&writer).unwrap_or(false) {
-        //is_pipe = true;
+        output_to_pipe = true;
         match set_pipe_max_size(&writer) {
             Ok(_) => {}
             Err(e) => eprintln!("set_pipe_max_size:{e} (ignored)"),
@@ -138,13 +181,24 @@ fn main() {
                     meta.sequence,
                     meta.timestamp
                 );
-                match writer.write_all(buf) {
-                    Ok(_) => {}
-                    Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
-                    Err(ref e) if e.kind() == ErrorKind::BrokenPipe => break,
-                    Err(e) => {
-                        eprintln!("error: {e:?}");
-                        break;
+
+                if output_to_pipe {
+                    match vmsplice_single_buffer(buf, writer.as_raw_fd()) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            eprintln!("error: {e:?}");
+                            break;
+                        }
+                    }
+                } else {
+                    match writer.write_all(buf) {
+                        Ok(_) => {}
+                        Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+                        Err(ref e) if e.kind() == ErrorKind::BrokenPipe => break,
+                        Err(e) => {
+                            eprintln!("error: {e:?}");
+                            break;
+                        }
                     }
                 }
                 frame_count += 1;
