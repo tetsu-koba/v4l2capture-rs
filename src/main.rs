@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Write;
 use std::process::exit;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -31,7 +33,7 @@ fn main() {
         exit(1);
     }
     let devname = &args[1];
-    let _out_file = &args[2];
+    let out_file = &args[2];
     let mut width: u32 = 640;
     let mut height: u32 = 480;
     let mut framerate: u32 = 30;
@@ -52,6 +54,8 @@ fn main() {
     if args.len() >= 8 {
         max_frames = args[7].parse().expect("failed to parse maxframes");
     }
+    let mut writer =
+        File::create(out_file).unwrap_or_else(|_| panic!("failed to open :{}", out_file));
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -87,20 +91,37 @@ fn main() {
                     meta.sequence,
                     meta.timestamp
                 );
+                match writer.write_all(buf) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        if let Some(raw_os_err) = e.raw_os_error() {
+                            match raw_os_err {
+                                libc::EINTR => {}
+                                libc::EPIPE => break,
+                                _ => {
+                                    eprintln!("raw OS error: {raw_os_err:?}");
+                                    break;
+                                }
+                            }
+                        } else {
+                            eprintln!("error: {e:?}");
+                            break;
+                        }
+                    }
+                }
+                frame_count += 1;
+                if max_frames > 0 && frame_count >= max_frames {
+                    break;
+                }
             }
             Err(e) => {
                 if let Some(raw_os_err) = e.raw_os_error() {
-                    println!("raw OS error: {raw_os_err:?}");
-                } else {
-                    println!("Not an OS error");
+                    if raw_os_err != libc::EINTR {
+                        println!("raw OS error: {raw_os_err:?}");
+                        break;
+                    }
                 }
-                //eprintln!("e = {}", e.what);
-                break;
             }
-        }
-        frame_count += 1;
-        if max_frames > 0 && frame_count >= max_frames {
-            break;
         }
     }
 }

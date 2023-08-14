@@ -285,6 +285,7 @@ name = "v4l2capture-rs"
 version = "0.1.0"
 dependencies = [
  "ctrlc",
+ "libc",
  "v4l",
 ]
 
