@@ -72,11 +72,17 @@ fn main() {
     fmt.height = height;
     fmt.fourcc = FourCC::new(pixelformat);
     let fmt = dev.set_format(&fmt).expect("Failed to write format");
-    _ = framerate;
+    let mut params = dev.params().expect("Failed to read params");
+    params.interval = v4l::fraction::Fraction {
+        numerator: 1,
+        denominator: framerate,
+    };
+    let params = dev.set_params(&params).expect("Failed to set params");
 
     // The actual format chosen by the device driver may differ from what we
     // requested! Print it out to get an idea of what is actually used now.
     eprintln!("Format in use:\n{}", fmt);
+    eprintln!("Params in use:\n{}", params);
 
     let mut stream =
         Stream::with_buffers(&dev, Type::VideoCapture, 4).expect("Failed to create buffer stream");
