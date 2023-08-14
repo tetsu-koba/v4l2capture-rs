@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::ErrorKind;
-use std::io::Write;
+use std::io::{self, Read, Write};
+use std::os::unix::fs::MetadataExt;
+use std::os::unix::io::AsRawFd;
 use std::process::exit;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -21,6 +23,38 @@ fn get_four_bytes(s: &String) -> Option<&[u8; 4]> {
             None
         }
     })
+}
+
+// Check if the given file descriptor is a pipe
+pub fn is_pipe(file: &File) -> Result<bool, io::Error> {
+    let metadata = file.metadata()?;
+    Ok(metadata.mode() & libc::S_IFMT == libc::S_IFIFO)
+}
+
+// Set the size of the given pipe file descriptor to the maximum size
+pub fn set_pipe_max_size(file: &File) -> Result<(), io::Error> {
+    // Read the maximum pipe size
+    let mut pipe_max_size_file = File::open("/proc/sys/fs/pipe-max-size")?;
+    let mut buffer = String::new();
+    pipe_max_size_file.read_to_string(&mut buffer)?;
+    let max_size_str = buffer.trim_end();
+    let max_size: libc::c_int = max_size_str.parse().map_err(|err| {
+        eprintln!("Failed to parse /proc/sys/fs/pipe-max-size: {:?}", err);
+        io::Error::new(io::ErrorKind::InvalidData, "Failed to parse max pipe size")
+    })?;
+
+    // If the current size is less than the maximum size, set the pipe size to the maximum size
+    let current_size = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETPIPE_SZ) };
+    if current_size < max_size {
+        let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETPIPE_SZ, max_size) };
+        if result != max_size {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Failed to set pipe size",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn main() {
@@ -57,7 +91,13 @@ fn main() {
     }
     let mut writer =
         File::create(out_file).unwrap_or_else(|_| panic!("failed to open :{}", out_file));
-
+    if is_pipe(&writer).unwrap_or(false) {
+        //is_pipe = true;
+        match set_pipe_max_size(&writer) {
+            Ok(_) => {}
+            Err(e) => eprintln!("set_pipe_max_size:{e} (ignored)"),
+        }
+    }
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
