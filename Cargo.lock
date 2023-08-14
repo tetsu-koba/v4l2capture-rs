@@ -272,20 +272,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "v4l2"
-version = "0.1.0"
-dependencies = [
- "ctrlc",
- "v4l",
-]
-
-[[package]]
 name = "v4l2-sys-mit"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6779878362b9bacadc7893eac76abe69612e8837ef746573c4a5239daf11990b"
 dependencies = [
  "bindgen",
+]
+
+[[package]]
+name = "v4l2capture-rs"
+version = "0.1.0"
+dependencies = [
+ "ctrlc",
+ "v4l",
 ]
 
 [[package]]

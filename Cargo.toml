@@ -1,5 +1,5 @@
 [package]
-name = "v4l2"
+name = "v4l2capture-rs"
 version = "0.1.0"
 edition = "2021"
 
