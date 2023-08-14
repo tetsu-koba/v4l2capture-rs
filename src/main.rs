@@ -52,7 +52,6 @@ fn main() {
     if args.len() >= 8 {
         max_frames = args[7].parse().expect("failed to parse maxframes");
     }
-    _ = max_frames;
 
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -77,6 +76,7 @@ fn main() {
     let mut stream =
         Stream::with_buffers(&dev, Type::VideoCapture, 4).expect("Failed to create buffer stream");
 
+    let mut frame_count: usize = 0;
     while running.load(Ordering::SeqCst) {
         match stream.next() {
             Ok(t) => {
@@ -97,6 +97,10 @@ fn main() {
                 //eprintln!("e = {}", e.what);
                 break;
             }
+        }
+        frame_count += 1;
+        if max_frames > 0 && frame_count >= max_frames {
+            break;
         }
     }
 }
