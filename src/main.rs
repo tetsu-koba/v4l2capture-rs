@@ -1,8 +1,8 @@
+use nix::fcntl::{fcntl, FcntlArg};
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::{self, Read, Write};
-use std::os::unix::fs::MetadataExt;
-use std::os::unix::io::AsRawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::process::exit;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,13 +26,15 @@ fn get_four_bytes(s: &String) -> Option<&[u8; 4]> {
 }
 
 // Check if the given file descriptor is a pipe
-pub fn is_pipe(file: &File) -> Result<bool, io::Error> {
-    let metadata = file.metadata()?;
-    Ok(metadata.mode() & libc::S_IFMT == libc::S_IFIFO)
+fn is_pipe(fd: RawFd) -> bool {
+    match nix::sys::stat::fstat(fd) {
+        Ok(stat) => stat.st_mode & libc::S_IFMT == libc::S_IFIFO,
+        Err(_) => false,
+    }
 }
 
 // Set the size of the given pipe file descriptor to the maximum size
-pub fn set_pipe_max_size(file: &File) -> Result<(), io::Error> {
+pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
     // Read the maximum pipe size
     let mut pipe_max_size_file = File::open("/proc/sys/fs/pipe-max-size")?;
     let mut buffer = String::new();
@@ -44,15 +46,9 @@ pub fn set_pipe_max_size(file: &File) -> Result<(), io::Error> {
     })?;
 
     // If the current size is less than the maximum size, set the pipe size to the maximum size
-    let current_size = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETPIPE_SZ) };
+    let current_size = fcntl(fd, FcntlArg::F_GETPIPE_SZ)?;
     if current_size < max_size {
-        let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETPIPE_SZ, max_size) };
-        if result != max_size {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "Failed to set pipe size",
-            ));
-        }
+        _ = fcntl(fd, FcntlArg::F_SETPIPE_SZ(max_size))?;
     }
     Ok(())
 }
@@ -134,9 +130,9 @@ fn main() {
     let mut writer =
         File::create(out_file).unwrap_or_else(|_| panic!("failed to open :{}", out_file));
     let mut output_to_pipe = false;
-    if is_pipe(&writer).unwrap_or(false) {
+    if is_pipe(writer.as_raw_fd()) {
         output_to_pipe = true;
-        match set_pipe_max_size(&writer) {
+        match set_pipe_max_size(writer.as_raw_fd()) {
             Ok(_) => {}
             Err(e) => eprintln!("set_pipe_max_size:{e} (ignored)"),
         }
