@@ -1,11 +1,8 @@
 use nix::errno::Errno;
-use nix::fcntl::{fcntl, FcntlArg};
-use nix::fcntl::{vmsplice, SpliceFFlags};
 use std::fs::File;
 use std::io::ErrorKind;
-use std::io::IoSlice;
-use std::io::{self, Read, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::io::Write;
+use std::os::unix::io::AsRawFd;
 use std::process::exit;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -15,6 +12,7 @@ use v4l::io::traits::CaptureStream;
 use v4l::video::Capture;
 use v4l::Device;
 use v4l::FourCC;
+mod pipe;
 
 fn get_four_bytes(s: &String) -> Option<&[u8; 4]> {
     let bytes = s.as_bytes();
@@ -26,56 +24,6 @@ fn get_four_bytes(s: &String) -> Option<&[u8; 4]> {
             None
         }
     })
-}
-
-// Check if the given file descriptor is a pipe
-fn is_pipe(fd: RawFd) -> bool {
-    match nix::sys::stat::fstat(fd) {
-        Ok(stat) => stat.st_mode & libc::S_IFMT == libc::S_IFIFO,
-        Err(_) => false,
-    }
-}
-
-// Set the size of the given pipe file descriptor to the maximum size
-pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
-    // Read the maximum pipe size
-    let mut pipe_max_size_file = File::open("/proc/sys/fs/pipe-max-size")?;
-    let mut buffer = String::new();
-    pipe_max_size_file.read_to_string(&mut buffer)?;
-    let max_size_str = buffer.trim_end();
-    let max_size: libc::c_int = max_size_str.parse().map_err(|err| {
-        eprintln!("Failed to parse /proc/sys/fs/pipe-max-size: {:?}", err);
-        io::Error::new(io::ErrorKind::InvalidData, "Failed to parse max pipe size")
-    })?;
-
-    // If the current size is less than the maximum size, set the pipe size to the maximum size
-    let current_size = fcntl(fd, FcntlArg::F_GETPIPE_SZ)?;
-    if current_size < max_size {
-        _ = fcntl(fd, FcntlArg::F_SETPIPE_SZ(max_size))?;
-    }
-    Ok(())
-}
-
-pub fn vmsplice_single_buffer(buf: &[u8], fd: RawFd) -> Result<(), Errno> {
-    let mut iov = IoSlice::new(buf);
-    loop {
-        match vmsplice(fd, &[iov], SpliceFFlags::SPLICE_F_GIFT) {
-            Ok(n) => {
-                if n == iov.len() {
-                    return Ok(());
-                } else if n != 0 {
-                    iov = IoSlice::new(&buf[n..]);
-                    continue;
-                } else {
-                    unreachable!();
-                }
-            }
-            Err(err) => match err {
-                Errno::EINTR => continue,
-                _ => return Err(err),
-            },
-        }
-    }
 }
 
 fn main() {
@@ -113,9 +61,9 @@ fn main() {
     let mut writer =
         File::create(out_file).unwrap_or_else(|_| panic!("failed to open :{}", out_file));
     let mut output_to_pipe = false;
-    if is_pipe(writer.as_raw_fd()) {
+    if pipe::is_pipe(writer.as_raw_fd()) {
         output_to_pipe = true;
-        match set_pipe_max_size(writer.as_raw_fd()) {
+        match pipe::set_pipe_max_size(writer.as_raw_fd()) {
             Ok(_) => {}
             Err(e) => eprintln!("set_pipe_max_size:{e} (ignored)"),
         }
@@ -162,7 +110,7 @@ fn main() {
                 );
 
                 if output_to_pipe {
-                    match vmsplice_single_buffer(buf, writer.as_raw_fd()) {
+                    match pipe::vmsplice_single_buffer(buf, writer.as_raw_fd()) {
                         Ok(_) => {}
                         Err(e) if e == Errno::EPIPE => break,
                         Err(e) => {
