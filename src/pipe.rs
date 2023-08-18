@@ -14,17 +14,23 @@ pub fn is_pipe(fd: RawFd) -> bool {
     }
 }
 
-// Set the size of the given pipe file descriptor to the maximum size
-pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
+// Get pipe max buffer size
+pub fn get_pipe_max_size() -> Result<usize, io::Error> {
     // Read the maximum pipe size
     let mut pipe_max_size_file = File::open("/proc/sys/fs/pipe-max-size")?;
     let mut buffer = String::new();
     pipe_max_size_file.read_to_string(&mut buffer)?;
     let max_size_str = buffer.trim_end();
-    let max_size: libc::c_int = max_size_str.parse().map_err(|err| {
+    let max_size: usize = max_size_str.parse().map_err(|err| {
         eprintln!("Failed to parse /proc/sys/fs/pipe-max-size: {:?}", err);
         io::Error::new(io::ErrorKind::InvalidData, "Failed to parse max pipe size")
     })?;
+    Ok(max_size)
+}
+
+// Set the size of the given pipe file descriptor to the maximum size
+pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
+    let max_size: libc::c_int = get_pipe_max_size()? as _;
 
     // If the current size is less than the maximum size, set the pipe size to the maximum size
     let current_size = fcntl(fd, FcntlArg::F_GETPIPE_SZ)?;
@@ -35,7 +41,7 @@ pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
 }
 
 pub fn vmsplice_single_buffer(buf: &[u8], fd: RawFd) -> Result<(), Errno> {
-    assert!(buf.len() != 0);
+    assert!(!buf.is_empty());
     let mut iov = IoSlice::new(buf);
     loop {
         match vmsplice(fd, &[iov], SpliceFFlags::SPLICE_F_GIFT) {
