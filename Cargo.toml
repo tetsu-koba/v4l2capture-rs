@@ -7,6 +7,6 @@ edition = "2021"
 
 [dependencies]
 v4l = "0.14"
-ctrlc = {version = "3.4.0", features = ["termination"]}
+ctrlc = {version = "3.4", features = ["termination"]}
 nix = "0.26"
 libc = "0.2"
