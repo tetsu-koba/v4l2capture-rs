@@ -40,7 +40,7 @@ pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
     Ok(())
 }
 
-pub fn vmsplice_single_buffer(buf: &[u8], fd: RawFd) -> Result<(), Errno> {
+pub fn vmsplice_single_buffer(mut buf: &[u8], fd: RawFd) -> Result<(), Errno> {
     assert!(!buf.is_empty());
     let mut iov = IoSlice::new(buf);
     loop {
@@ -49,7 +49,8 @@ pub fn vmsplice_single_buffer(buf: &[u8], fd: RawFd) -> Result<(), Errno> {
                 if n == iov.len() {
                     return Ok(());
                 } else if n != 0 {
-                    iov = IoSlice::new(&buf[n..]);
+                    buf = &buf[n..];
+                    iov = IoSlice::new(buf);
                     continue;
                 } else {
                     unreachable!();
