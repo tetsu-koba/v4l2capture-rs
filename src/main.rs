@@ -1,6 +1,9 @@
+use nix::errno::Errno;
 use nix::fcntl::{fcntl, FcntlArg};
+use nix::fcntl::{vmsplice, SpliceFFlags};
 use std::fs::File;
 use std::io::ErrorKind;
+use std::io::IoSlice;
 use std::io::{self, Read, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::process::exit;
@@ -53,45 +56,25 @@ pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
     Ok(())
 }
 
-fn get_errno() -> libc::c_int {
-    unsafe { *libc::__errno_location() }
-}
-
-pub fn vmsplice_single_buffer(buf: &[u8], fd: libc::c_int) -> Result<(), &'static str> {
-    let mut iov = libc::iovec {
-        iov_base: buf.as_ptr() as *mut libc::c_void,
-        iov_len: buf.len(),
-    };
+pub fn vmsplice_single_buffer(buf: &[u8], fd: RawFd) -> Result<(), Errno> {
+    let mut iov = IoSlice::new(buf);
     loop {
-        let n = unsafe {
-            libc::vmsplice(
-                fd,
-                &mut iov as *mut _,
-                1,
-                libc::SPLICE_F_GIFT as libc::c_uint,
-            )
-        };
-        if n < 0 {
-            match get_errno() {
-                libc::EINTR => continue,
-                libc::EAGAIN => unreachable!(),
-                libc::EPIPE => return Err("BrokenPipe"),
-                libc::EBADF => return Err("InvalidFileDescriptor"),
-                libc::EINVAL => return Err("InvalidArgument"),
-                libc::ENOMEM => return Err("SystemResources"),
-                _ => {
-                    eprintln!("vmsplice: errno={}", get_errno());
-                    return Err("VmspliceFailed");
+        match vmsplice(fd, &[iov], SpliceFFlags::SPLICE_F_GIFT) {
+            Ok(n) => {
+                if n == iov.len() {
+                    return Ok(());
+                } else if n != 0 {
+                    iov = IoSlice::new(&buf[n..]);
+                    continue;
+                } else {
+                    unreachable!();
                 }
             }
-        } else if n as usize == iov.iov_len {
-            return Ok(());
-        } else if n != 0 {
-            iov.iov_len -= n as usize;
-            iov.iov_base = (iov.iov_base as usize + n as usize) as *mut libc::c_void;
-            continue;
+            Err(err) => match err {
+                Errno::EINTR => continue,
+                _ => return Err(err),
+            },
         }
-        return Err("Vmsplice");
     }
 }
 
@@ -181,6 +164,7 @@ fn main() {
                 if output_to_pipe {
                     match vmsplice_single_buffer(buf, writer.as_raw_fd()) {
                         Ok(_) => {}
+                        Err(e) if e == Errno::EPIPE => break,
                         Err(e) => {
                             eprintln!("error: {e:?}");
                             break;
