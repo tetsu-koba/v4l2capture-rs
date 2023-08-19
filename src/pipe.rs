@@ -41,7 +41,9 @@ pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
 }
 
 pub fn vmsplice_single_buffer(mut buf: &[u8], fd: RawFd) -> Result<(), Errno> {
-    assert!(!buf.is_empty());
+    if buf.is_empty() {
+        return Ok(());
+    };
     let mut iov = IoSlice::new(buf);
     loop {
         match vmsplice(fd, &[iov], SpliceFFlags::SPLICE_F_GIFT) {
