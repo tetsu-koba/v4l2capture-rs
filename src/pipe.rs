@@ -44,24 +44,14 @@ pub fn vmsplice_single_buffer(mut buf: &[u8], fd: RawFd) -> Result<(), Errno> {
     if buf.is_empty() {
         return Ok(());
     };
-    let mut iov = IoSlice::new(buf);
     loop {
+        let iov = IoSlice::new(buf);
         match vmsplice(fd, &[iov], SpliceFFlags::SPLICE_F_GIFT) {
-            Ok(n) => {
-                if n == iov.len() {
-                    return Ok(());
-                } else if n != 0 {
-                    buf = &buf[n..];
-                    iov = IoSlice::new(buf);
-                    continue;
-                } else {
-                    unreachable!();
-                }
-            }
-            Err(err) => match err {
-                Errno::EINTR => continue,
-                _ => return Err(err),
-            },
+            Ok(n) if n == iov.len() => return Ok(()),
+            Ok(n) if n != 0 => buf = &buf[n..],
+            Ok(_) => unreachable!(),
+            Err(err) if err == Errno::EINTR => {}
+            Err(err) => return Err(err),
         }
     }
 }
