@@ -1,3 +1,4 @@
 /target
 *~
-
+send*.sh*
+*.log
