@@ -99,46 +99,43 @@ fn main() {
 
     let mut frame_count: usize = 0;
     while running.load(Ordering::SeqCst) {
-        match stream.next() {
-            Ok(t) => {
-                let (buf, meta) = t;
-                eprintln!(
-                    "Buffer size: {}, seq: {}, timestamp: {}",
-                    buf.len(),
-                    meta.sequence,
-                    meta.timestamp
-                );
-
-                if output_to_pipe {
-                    match pipe::vmsplice_single_buffer(buf, writer.as_raw_fd()) {
-                        Ok(_) => {}
-                        Err(e) if e == Errno::EPIPE => break,
-                        Err(e) => {
-                            eprintln!("error: {e:?}");
-                            break;
-                        }
-                    }
-                } else {
-                    match writer.write_all(buf) {
-                        Ok(_) => {}
-                        Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
-                        Err(ref e) if e.kind() == ErrorKind::BrokenPipe => break,
-                        Err(e) => {
-                            eprintln!("error: {e:?}");
-                            break;
-                        }
-                    }
-                }
-                frame_count += 1;
-                if max_frames > 0 && frame_count >= max_frames {
-                    break;
-                }
-            }
-            Err(ref e) if e.kind() == ErrorKind::Interrupted => {}
+        let (buf, meta) = match stream.next() {
+            Ok(t) => t,
+            Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => {
                 println!("raw OS error: {e:?}");
                 break;
             }
+        };
+        eprintln!(
+            "Buffer size: {}, seq: {}, timestamp: {}",
+            buf.len(),
+            meta.sequence,
+            meta.timestamp
+        );
+
+        if output_to_pipe {
+            match pipe::vmsplice_single_buffer(buf, writer.as_raw_fd()) {
+                Ok(_) => {}
+                Err(e) if e == Errno::EPIPE => break,
+                Err(e) => {
+                    eprintln!("error: {e:?}");
+                    break;
+                }
+            }
+        } else {
+            match writer.write_all(buf) {
+                Ok(_) => {}
+                Err(ref e) if e.kind() == ErrorKind::BrokenPipe => break,
+                Err(e) => {
+                    eprintln!("error: {e:?}");
+                    break;
+                }
+            }
+        }
+        frame_count += 1;
+        if max_frames > 0 && frame_count >= max_frames {
+            break;
         }
     }
 }
