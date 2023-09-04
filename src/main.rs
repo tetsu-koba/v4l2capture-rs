@@ -118,10 +118,9 @@ fn main() {
         } else {
             writer.write_all(buf)
         } {
-            if e.kind() == ErrorKind::BrokenPipe {
-                break;
+            if e.kind() != ErrorKind::BrokenPipe {
+                eprintln!("error: {e:?}");
             }
-            eprintln!("error: {e:?}");
             break;
         }
         frame_count += 1;
