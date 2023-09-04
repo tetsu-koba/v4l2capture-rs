@@ -15,6 +15,7 @@ pub fn is_pipe(fd: RawFd) -> bool {
 }
 
 // Get pipe max buffer size
+#[cfg(target_os = "linux")]
 pub fn get_pipe_max_size() -> Result<usize, io::Error> {
     // Read the maximum pipe size
     let mut pipe_max_size_file = File::open("/proc/sys/fs/pipe-max-size")?;
@@ -29,6 +30,7 @@ pub fn get_pipe_max_size() -> Result<usize, io::Error> {
 }
 
 // Set the size of the given pipe file descriptor to the maximum size
+#[cfg(target_os = "linux")]
 pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
     let max_size: libc::c_int = get_pipe_max_size()? as _;
 
@@ -40,7 +42,8 @@ pub fn set_pipe_max_size(fd: RawFd) -> Result<(), io::Error> {
     Ok(())
 }
 
-pub fn vmsplice_single_buffer(mut buf: &[u8], fd: RawFd) -> Result<(), Errno> {
+#[cfg(target_os = "linux")]
+pub fn vmsplice_single_buffer(mut buf: &[u8], fd: RawFd) -> Result<(), io::Error> {
     if buf.is_empty() {
         return Ok(());
     };
@@ -51,7 +54,7 @@ pub fn vmsplice_single_buffer(mut buf: &[u8], fd: RawFd) -> Result<(), Errno> {
             Ok(n) if n != 0 => buf = &buf[n..],
             Ok(_) => unreachable!(),
             Err(err) if err == Errno::EINTR => {}
-            Err(err) => return Err(err),
+            Err(err) => return Err(err.into()),
         }
     }
 }

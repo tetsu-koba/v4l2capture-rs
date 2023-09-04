@@ -1,4 +1,3 @@
-use nix::errno::Errno;
 use std::fs::File;
 use std::io::ErrorKind;
 use std::io::Write;
@@ -114,24 +113,16 @@ fn main() {
             meta.timestamp
         );
 
-        if output_to_pipe {
-            match pipe::vmsplice_single_buffer(buf, writer.as_raw_fd()) {
-                Ok(_) => {}
-                Err(e) if e == Errno::EPIPE => break,
-                Err(e) => {
-                    eprintln!("error: {e:?}");
-                    break;
-                }
-            }
+        if let Err(e) = if output_to_pipe {
+            pipe::vmsplice_single_buffer(buf, writer.as_raw_fd())
         } else {
-            match writer.write_all(buf) {
-                Ok(_) => {}
-                Err(ref e) if e.kind() == ErrorKind::BrokenPipe => break,
-                Err(e) => {
-                    eprintln!("error: {e:?}");
-                    break;
-                }
+            writer.write_all(buf)
+        } {
+            if e.kind() == ErrorKind::BrokenPipe {
+                break;
             }
+            eprintln!("error: {e:?}");
+            break;
         }
         frame_count += 1;
         if max_frames > 0 && frame_count >= max_frames {
